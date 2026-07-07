@@ -8,12 +8,12 @@ license-files = ["LICENSE"]
 authors = [{ name = "Agno", email = "hello@agno.com" }]
 
 dependencies = [
-  "agno[os,slack]",
+  "agno[os,slack]==2.7.0a7",
   "fastapi[standard]",
   # AgentOS's MCP server (enable_mcp_server) imports fastmcp at runtime, but agno
   # only declares it in its test extra — so @context must depend on it directly.
-  # Pinned <3 because agno 2.6.x targets the fastmcp 2.x API.
-  "fastmcp<3",
+  # agno 2.7.x targets the fastmcp 3.x API (the Starters run fastmcp 3.4.3).
+  "fastmcp>=3,<4",
   "google-api-python-client",
   "google-auth-httplib2",
   "google-auth-oauthlib",
