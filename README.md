@@ -348,7 +348,7 @@ Here are the runtime skills that are included in the repo:
 
 ## Evals
 
-@context comes with an eval suite ([`evals/`](evals/)) for regression testing. It's tests the claim that: *anyone can write, only you can read.*
+@context comes with an eval suite ([`evals/`](evals/)) for regression testing. It tests the claim that: *anyone can write, only you can read.*
 
 Run it:
 
@@ -365,6 +365,7 @@ python -m evals --case <name>  # one case
 | `OPENAI_API_KEY` | yes | none | OpenAI key for models and embeddings. |
 | `OWNER_ID` | prd | none | Comma-separated identities that count as the owner (JWT `sub` and/or Slack email). First is canonical. Unset means capture-only for everyone. |
 | `OWNER_NAME` | no | canonical `OWNER_ID` | Display name rendered into the prompt. Cosmetic, never matched as an identity. |
+| `OWNER_TIMEZONE` | no | `UTC` | Your IANA timezone (e.g. `America/Los_Angeles`). Anchors "today", due/overdue math, and relative dates to your local day. |
 | `RUNTIME_ENV` | no | `prd` | `dev` enables hot-reload and disables JWT. Compose sets this to `dev` for local. |
 | `JWT_VERIFICATION_KEY` | prd | none | Public key from os.agno.com. Required when `RUNTIME_ENV=prd`. |
 | `CONTEXT_SELF_VERIFICATION_KEY` | no | none | A second JWT public key the app *also* trusts, alongside the os.agno.com key — your own, so tokens you self-issue with `scripts/mint_mcp_jwt.py` verify (the os.agno.com UI keeps working). Written by that script; pushed to the server by `env-sync.sh`. See [Connect production @context MCP server](#connect-production-context-mcp-server). |
@@ -373,9 +374,14 @@ python -m evals --case <name>  # one case
 | `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. The deploy ships 1 replica, so the auto-generated value is fine; `scripts/railway/up.sh` still pins one so scaling up stays correct (override in `.env.production`). See [`docs/SCALING.md`](docs/SCALING.md). |
 | `PARALLEL_API_KEY` | no | none | Switches the `web` source from keyless Parallel MCP to the authenticated SDK (higher rate ceiling); recommended for production. Get a key at [platform.parallel.ai](https://platform.parallel.ai/settings?tab=api-keys). |
 | `SLACK_BOT_TOKEN` / `SLACK_SIGNING_SECRET` | no | none | Both enable the Slack interface. The bot token alone activates the `slack` source (`query_slack` + the ungated `update_slack` send tool) and auto-arms the scheduled digests. See [`docs/SLACK.md`](docs/SLACK.md). |
+| `SLACK_USER_TOKEN` | no | none | A Slack *user* token (`xoxp-`, scope `search:read`). Unlocks workspace-wide message search for `query_slack`; without it reads fall back to channel/thread history. |
 | `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` | no | `0 13 * * *` / `0 22 * * 0` | UTC cron for the Slack-delivered daily rundown and weekly plan (only armed when Slack is set). See [`docs/SLACK.md`](docs/SLACK.md). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_PROJECT_ID` | no | none | Connect your Gmail + Calendar; mint tokens with `python scripts/google_mint_tokens.py`. See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
 | `GMAIL_TOKEN_JSON_B64` / `CALENDAR_TOKEN_JSON_B64` | no | none | Minted Gmail/Calendar tokens as base64, so they survive a deploy. The entrypoint restores them at startup. See [`docs/GOOGLE.md`](docs/GOOGLE.md). |
+| `GMAIL_TOKEN_FILE` / `CALENDAR_TOKEN_FILE` | no | `<repo>/gmail_token.json`, `<repo>/calendar_token.json` | Where the Google OAuth token caches live (read by the providers, written by the mint script). |
+| `USE_CONTEXT_TIMEOUT` | no | `55` | Hard ceiling (seconds) for one `use_context` MCP run — keep it under the client's own tool timeout. |
+| `PROVIDER_TIMEOUT` / `BACKBONE_TIMEOUT` | no | `20` / `35` | Per-source ceilings (seconds) for best-effort and backbone (CRM) reads in a rundown's fan-out. |
+| `THREAD_POOL_WORKERS` | no | `64` | Size of the thread pool that runs sync provider I/O — the stock ~6 queues fast sources behind slow ones. |
 | `KNOWLEDGE_REPO_URL` / `KNOWLEDGE_GITHUB_TOKEN` | no | none | Set both to back the `knowledge` base with a Git repo instead of local files. Optional knobs: `KNOWLEDGE_BRANCH` (default `main`), `KNOWLEDGE_LOCAL_PATH`. |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_DATABASE` | no | matches compose | Postgres connection. |
 | `DB_DRIVER` | no | `postgresql+psycopg` | SQLAlchemy driver. |

@@ -24,7 +24,8 @@ The workflow is registered with AgentOS and run by the hourly `queue-reminders`
 schedule; the tool is wired onto the context agent (see `app/schedules.py`).
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from agno.run import RunContext
 from agno.tools import tool
@@ -34,6 +35,7 @@ from sqlalchemy import text
 
 from agents.inbox import require_owner
 from app.identity import CANONICAL_OWNER_ID, is_owner
+from app.settings import owner_timezone
 from db import SCHEMA, get_postgres_db, get_sql_engine
 from workflows.notify import dm_owner
 
@@ -42,11 +44,16 @@ _UPDATES = f"{SCHEMA}.updates"
 
 
 def _format_due(due_at: datetime) -> str:
-    """A due timestamp as `2026-06-13` (date-only) or `2026-06-13 14:00 UTC` (timed)."""
-    d = due_at.astimezone(timezone.utc)
+    """A due timestamp as `2026-06-13` (date-only) or `2026-06-13 14:00 PDT` (timed).
+
+    Rendered in the owner's timezone (`OWNER_TIMEZONE`), matching how the due date
+    was filed — the CRM write sub-agent resolves "Friday 3pm" in the owner's local
+    zone, so a local-midnight timestamp is a date-only reminder.
+    """
+    d = due_at.astimezone(ZoneInfo(owner_timezone()))
     if (d.hour, d.minute) == (0, 0):
         return d.strftime("%Y-%m-%d")
-    return d.strftime("%Y-%m-%d %H:%M UTC")
+    return d.strftime("%Y-%m-%d %H:%M %Z")
 
 
 def _ping_owner_on_slack(due: list) -> None:

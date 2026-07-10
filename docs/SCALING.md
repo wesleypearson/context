@@ -7,7 +7,7 @@ default is deliberate: the **remote MCP server needs it**.
 
 ## Why one replica (the MCP reason)
 
-The owner's main way in is the MCP server (`use_context` / `ask_context` at
+The owner's main way in is the MCP server (`use_context` at
 `/mcp` — see [`docs/MCP.md`](MCP.md)). MCP's streamable-HTTP transport is
 **stateful**: the client opens a session (a POST that returns an
 `Mcp-Session-Id`) and then keeps a server→client SSE stream open against *that
@@ -78,5 +78,3 @@ OOM-killed or crash-looping, adding replicas won't fix it — raise
 `limits.memory` / `limits.cpu` in [`railway.json`](../railway.json) (or fix the
 underlying spike) instead. `railway logs --service agent-os` shows the restart
 reason.
-</content>
-</invoke>

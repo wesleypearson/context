@@ -132,10 +132,10 @@ if [[ -z "$OWNER_ID" ]]; then
     echo ""
 fi
 
-# railway.json ships 2 replicas. Without a shared scheduler token each replica
-# auto-generates its own, and a scheduler trigger authenticated by one replica
-# is rejected by the other (~half the time). Pin one now so it's forwarded
-# below; respects an explicit value if the env file already set it.
+# railway.json ships 1 replica, so the per-process auto-generated scheduler
+# token would be fine — but pin one anyway so scaling up stays correct (replicas
+# minting their own means a trigger signed by one is rejected by another).
+# Respects an explicit value if the env file already set it.
 INTERNAL_SERVICE_TOKEN="${INTERNAL_SERVICE_TOKEN:-$(openssl rand -hex 32)}"
 export INTERNAL_SERVICE_TOKEN
 

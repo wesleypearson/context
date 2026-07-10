@@ -56,13 +56,21 @@ def warn_on_missing_config() -> None:
 
     Called once from the AgentOS lifespan (app/main.py).
     """
-    from app.identity import owner_configured  # local import to keep settings load lean
+    from app.identity import owner_configured, owner_email  # local import to keep settings load lean
 
     # Without an OWNER_ID, @context is capture-only for everyone.
     if is_prd() and not owner_configured():
         log_warning(
             "OWNER_ID is not set — no caller will be treated as the owner. "
             "Context is capture-only for everyone until OWNER_ID is set."
+        )
+    # Every proactive Slack delivery (digests, reminder nudges) resolves the owner's
+    # DM via an email-shaped OWNER_ID entry; without one, dm_owner no-ops silently.
+    if getenv("SLACK_BOT_TOKEN") and owner_email() is None:
+        log_warning(
+            "SLACK_BOT_TOKEN is set but no OWNER_ID entry looks like an email — "
+            "digests and reminder DMs cannot resolve your Slack DM and will be skipped. "
+            "Add your Slack email to OWNER_ID."
         )
     # Without OWNER_TIMEZONE, "today" and relative dates fall back to UTC.
     if owner_timezone_configured():

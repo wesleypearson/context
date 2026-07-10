@@ -241,10 +241,11 @@ def _create_knowledge_provider() -> WikiContextProvider:
 def _create_slack_provider() -> SlackContextProvider | None:
     """Slack — read + write. `query_slack` reads channels/DMs; `update_slack` posts.
 
-    Note: `search.messages` needs a *user* token (`xoxp-`, scope `search:read`); a bot
-    token returns `not_allowed_token_type`. Agno hard-codes `enable_search_messages=True`
-    with no user-token slot, so search errors out and the read falls back to
-    channel/thread history. Pass a user token here to restore it.
+    Message search (`search.messages`) needs a *user* token (`xoxp-`, scope
+    `search:read`) — the provider reads `SLACK_USER_TOKEN` from env and enables
+    search only when one is set; without one, reads fall back to channel/thread
+    history. (Reads issued from Slack-interface runs also get workspace search
+    via the interface's action token.)
     """
     if not getenv("SLACK_BOT_TOKEN"):
         return None

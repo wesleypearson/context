@@ -120,10 +120,11 @@ async def use_context(message: str, user_id: str | None = None, session_id: str 
     answer = result.content or ""
     if getattr(result, "is_paused", False):
         # A gated act tool (calendar) is waiting on the owner. There's no approval
-        # affordance over MCP, so point them at the chat UI.
+        # affordance over MCP, so point them at the surfaces that have one.
         answer += (
-            "\n\n[An action is waiting on your approval before it can run — approve it in the "
-            "AgentOS chat UI, then ask me to continue.]"
+            "\n\n[An action is waiting on your approval before it can run — approve it in "
+            "Slack (the approval buttons in your thread) or the AgentOS chat UI, then ask "
+            "me to continue.]"
         )
     return answer
 
@@ -143,7 +144,7 @@ def _allowed_hosts() -> list[str]:
 
 
 def context_mcp_config() -> MCPServerConfig:
-    """Configuration for the @context MCP server — passed to ``AgentOS(mcp_config=...)``.
+    """Configuration for the @context MCP server — passed to ``AgentOS(mcp_server=...)``.
 
     Owner-only, single-tool surface:
       - ``tools=[use_context]`` — the one tool the server exposes.

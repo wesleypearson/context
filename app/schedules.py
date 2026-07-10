@@ -38,8 +38,8 @@ def register_schedules() -> None:
       (delivery is a Slack DM, so there's no point arming them otherwise). Each
       hits its digest workflow, which runs a read-only playbook as the owner and
       DMs the result (see `workflows/digest.py`). Cron is tunable via
-      `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC); defaults are a weekday-
-      morning rundown and a Sunday-evening week-plan.
+      `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC); defaults are a daily
+      13:00 UTC rundown and a Sunday-evening week-plan.
     """
     try:
         manager = ScheduleManager(get_postgres_db())

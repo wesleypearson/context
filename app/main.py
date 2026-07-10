@@ -42,15 +42,17 @@ def _build_interfaces() -> list:
             token=token,
             signing_secret=signing_secret,
             resolve_user_identity=True,
-            # Quick prompts in the assistant pane.
+            # Quick prompts in the assistant pane. Slack shows these to every user
+            # identically (the thread-started event carries no identity), so lead
+            # with the one action everyone can take; the owner-only prompts follow.
             # Mirrors the quick prompts in app/config.yaml.
             suggested_prompts=[
-                {"title": "Daily rundown", "message": "Give me a rundown of what's waiting on me"},
-                {"title": "My week", "message": "What does my week look like?"},
                 {
                     "title": "Leave an update",
                     "message": "Met Kyle from Agno, wants a partnership — follow up next week",
                 },
+                {"title": "Daily rundown", "message": "Give me a rundown of what's waiting on me"},
+                {"title": "My week", "message": "What does my week look like?"},
             ],
         )
     ]
@@ -99,8 +101,7 @@ agent_os = AgentOS(
     scheduler_base_url=scheduler_base_url,
     internal_service_token=getenv("INTERNAL_SERVICE_TOKEN") or None,
     # Owner-only single-tool MCP server at /mcp — see app/mcp.py.
-    enable_mcp_server=True,
-    mcp_config=context_mcp_config(),
+    mcp_server=context_mcp_config(),
 )
 app = agent_os.get_app()
 log_info("@context: owner-only MCP server mounted at /mcp")

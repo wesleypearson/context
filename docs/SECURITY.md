@@ -76,7 +76,7 @@ it. Everything downstream keys off that one verdict, derived **fresh per run**.
 ### L1 — Identity-conditioned toolset (primary)
 
 The owner-vs-other decision is made **before the model runs**, by choosing the
-toolset from the trusted identity. [`context_tools()`](../agents/context.py) is a
+toolset from the trusted identity. [`context_tools()`](../agents/policy.py) is a
 callable `tools=` resolved per run (`cache_callables=False`):
 
 ```python
@@ -182,11 +182,11 @@ Reading and filing stay inside the owner's own store. Two write tools reach
   is the draft itself — stronger than an approval popup, because you can fix the
   wording before it goes.
 - **Calendar is approval-gated.** `update_calendar` changes the real calendar,
-  so it's the one tool in `ACT_TOOLS`. [`context_tools()`](../agents/context.py)
+  so it's the one tool in `ACT_TOOLS`. [`context_tools()`](../agents/policy.py)
   flags it `requires_confirmation` — agno pauses the run *before it executes*
-  and resumes only when the owner confirms (in the os.agno.com chat UI / the
-  approvals queue, or via the continue-run API). The model cannot self-approve;
-  declining discards the call.
+  and resumes only when the owner confirms (approve/reject buttons right in the
+  Slack thread, the os.agno.com chat UI / approvals queue, or the continue-run
+  API). The model cannot self-approve; declining discards the call.
 
 **Messaging is not an act tool — it's ungated by design.** `update_slack` (post
 to a channel, reply in a thread, DM a teammate, @-mention another person's
@@ -249,8 +249,8 @@ endpoint — the gate is in code, before the model runs:
   no config) plus the host from `AGENTOS_URL` (so a deploy / tunnel works). Any
   other Host is rejected with 400 before the gate even runs.
 
-We use AgentOS's native MCP server (`enable_mcp_server=True`,
-`mcp_config=context_mcp_config()`) — the owner gate, DNS-rebinding protection, and
+We use AgentOS's native MCP server (`mcp_server=context_mcp_config()`)
+— the owner gate, DNS-rebinding protection, and
 `user_id` injection are all configured on the `MCPServerConfig`, so there's no
 custom middleware to maintain. In dev (no JWT) the gate binds to the canonical
 `OWNER_ID`, the same keyless-local-as-owner shortcut used elsewhere — dev-only.
