@@ -37,12 +37,25 @@ ANON_USER_ID = "anon"
 # is configured — scheduled playbooks run as the owner's automation.
 SCHEDULER_USER_ID = "__scheduler__"
 
+# The reserved principal namespace AgentOS's built-in MCP OAuth server assigns
+# connected clients (`__oauth__:<client_id>`). Trusted only by the MCP owner
+# gate, and only while OAuth is armed — see `_caller_is_owner` in app/mcp.py.
+MCP_OAUTH_PREFIX = "__oauth__:"
+
+# The reserved principal namespace for agno service-account tokens (`sa:<name>`).
+# @context doesn't grant these any surface; listed so OWNER_ID can't claim one.
+SERVICE_ACCOUNT_PREFIX = "sa:"
+
 
 # Reserved internal identities — never valid owner ids. `anon` is the
 # unauthenticated sentinel and `__scheduler__` is minted only by the auth layer
 # from the internal service token; letting either into OWNER_ID would hand the
 # owner surface to unauthenticated callers (in dev) or be redundant.
 _RESERVED_IDS = frozenset({ANON_USER_ID.casefold(), SCHEDULER_USER_ID.casefold()})
+
+# Reserved namespaces — server-assigned principals (OAuth clients, service
+# accounts) are trust decisions made in code, never OWNER_ID entries.
+_RESERVED_PREFIXES = (MCP_OAUTH_PREFIX.casefold(), SERVICE_ACCOUNT_PREFIX.casefold())
 
 
 def _parse_owner_ids(raw: str) -> list[str]:
@@ -52,7 +65,8 @@ def _parse_owner_ids(raw: str) -> list[str]:
         candidate = part.strip()
         if not candidate:
             continue
-        if candidate.casefold() in _RESERVED_IDS:
+        folded = candidate.casefold()
+        if folded in _RESERVED_IDS or folded.startswith(_RESERVED_PREFIXES):
             dropped.append(candidate)
             continue
         ids.append(candidate)

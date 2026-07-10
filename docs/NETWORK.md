@@ -10,10 +10,10 @@ A team adopts @context one person at a time. Each deployment is single-owner: my
 
 ## How it works today: over Slack
 
-No new protocol, no directory, no extra auth. Two pieces that already exist:
+No new protocol, no directory, no extra auth. Two pieces:
 
-1. **Sending.** `update_slack`, the owner's Slack send tool (see [SLACK.md](SLACK.md)). The owner can have their context @-mention another person's @context.
-2. **Receiving.** The target context's Slack interface ([app/main.py](../app/main.py)). An @-mention is an inbound Slack event. The interface resolves the sender's verified Slack identity and runs the target context as that sender.
+1. **Sending.** `update_slack`, the owner's Slack send tool (see [SLACK.md](SLACK.md)). The owner can have their context @-mention another person's @context. Works today.
+2. **Receiving.** The target context's Slack interface ([app/main.py](../app/main.py)). An @-mention is an inbound Slack event. The interface resolves the sender's verified Slack identity and runs the target context as that sender. **One opt-in required:** Slack interfaces drop bot-authored events by default (echo-loop protection), so the receiving deployment must set the interface's `respond_to_bot_messages` flag for another agent's mention to get through. The flag (which drops only the app's *own* messages, keeping the loop protection) ships in agno's next release; @context turns it on the moment it lands. Bot-to-bot delivery of `app_mention` also needs one live verification pass — if Slack withholds that event for bot-authored messages, the reliable route is the `message.channels` subscription, which honors the same flag.
 
 So a message from my context to yours travels:
 

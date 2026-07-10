@@ -50,12 +50,9 @@ echo ""
 #     host, service port). A copied .env.production often still carries a local
 #     DB_HOST=localhost / context-db; pushing that would break the deploy, so
 #     up.sh stays the single owner of these.
-#   CONTEXT_MCP_JWT — the self-issued bearer token (scripts/mint_mcp_jwt.py) is
-#     client-side only: connect.py reads it locally to wire your MCP clients.
-#     The server verifies tokens with the *public* key (CONTEXT_SELF_VERIFICATION_KEY,
-#     which IS pushed), so it never needs the token — keep this signing-grade
-#     secret off the internet-facing box.
-SKIP_KEYS=" DB_HOST PORT CONTEXT_MCP_JWT "
+# Everything else syncs — including MCP_CONNECT_SECRET and
+# AGENTOS_MCP_SIGNING_KEY, which the server needs to run its MCP OAuth flow.
+SKIP_KEYS=" DB_HOST PORT "
 
 # Pull the service's current variables once. We diff against this so the sync
 # only pushes keys that are new or changed — every push is a deploy trigger, so
@@ -77,11 +74,7 @@ queue_if_changed() {
     local key="$1" value="$2"
 
     if [[ "$SKIP_KEYS" == *" ${key} "* ]]; then
-        if [[ "$key" == "CONTEXT_MCP_JWT" ]]; then
-            echo -e "${DIM}  Skipping ${key} (client-side token, kept off the server)${NC}"
-        else
-            echo -e "${DIM}  Skipping ${key} (managed by up.sh)${NC}"
-        fi
+        echo -e "${DIM}  Skipping ${key} (managed by up.sh)${NC}"
         return
     fi
 

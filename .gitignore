@@ -41,12 +41,11 @@ ENV/
 .env
 .env.production
 .envrc
-# Timestamped backups (e.g. scripts/mint_mcp_jwt.py --write makes one before
-# editing) — same secrets as the file they back up, so never commit them.
+# Timestamped .env backups — same secrets as the file they back up, so never
+# commit them.
 .env*.bak-*
 
-# Self-issued JWT signing key (minted by scripts/mint_mcp_jwt.py — never commit)
-secrets/
+# Private keys — never commit
 *.pem
 
 # =========================

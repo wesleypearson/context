@@ -6,9 +6,12 @@ Everything @context decides from the caller's verified identity, in one place:
 
 - The **surface**: which system prompt and which tools the caller gets. This is the
   primary owner/guest boundary — `context_tools` hands the owner the full provider
-  surface and a guest exactly one tool (`submit_update`), and `context_instructions`
-  renders the matching guide. The toolset is chosen here, in code, before the model
-  runs, so "a guest can't read the owner's data" is structural, not a prompt rule.
+  surface and a guest only the capture surface (`submit_update`, `my_updates` over
+  their own submissions, and free/busy `owner_availability` when the calendar is
+  connected — each scoped to the caller's verified identity in code), and
+  `context_instructions` renders the matching guide. The toolset is chosen here, in
+  code, before the model runs, so "a guest can't read the owner's data" is
+  structural, not a prompt rule.
 - The **hooks**: defense in depth on top of that surface — `normalize_identity`
   (pre-hook) refuses unidentified prod runs and collapses the owner's aliases;
   `enforce_capture_only` (tool-hook) soft-blocks any non-capture tool from a guest.
@@ -27,6 +30,7 @@ from agno.utils.log import log_warning
 
 from agents.inbox import CAPTURE_ONLY_TOOLS, GUEST_TOOLS, acknowledge, rundown
 from agents.instructions import CONTEXT_INSTRUCTIONS, GUEST_GUIDE, OWNER_GUIDE
+from agents.scheduling import guest_scheduling_tools
 from agents.sources import context_providers_summary, gate_act_tools, list_contexts, owner_provider_tools
 from app.identity import ANON_USER_ID, CANONICAL_OWNER_ID, is_owner, owner_display_name, resolved_user_id
 from app.settings import is_prd
@@ -116,10 +120,13 @@ def context_tools(run_context: RunContext | None = None) -> list:
 
     Wired as a callable on `Agent.tools` and resolved per run (`cache_callables=False`).
     The owner gets the full surface — provider tools, the inbound queue, runtime skills.
-    A guest gets exactly one tool: submit_update.
+    A guest gets the capture surface: submit_update, plus my_updates over their
+    own submissions (both scoped to the caller's verified identity in code).
     """
     if not is_owner(run_context):
-        return list(GUEST_TOOLS)
+        # The capture surface, plus availability (free/busy only) when the
+        # calendar is connected — see agents/scheduling.py.
+        return list(GUEST_TOOLS) + guest_scheduling_tools()
 
     # Provider reads are time-boxed so one slow source can't stall the run, and Google
     # reads skip on a dead token (see owner_provider_tools); the queue and skills layer on.

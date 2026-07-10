@@ -22,8 +22,25 @@ from workflows import WORKFLOWS
 # One database session for AgentOS persistence. (The scheduler and workflows open their own sessions)
 db = get_postgres_db()
 
-# Scheduler base URL — where cron triggers reach AgentOS (set your public URL in prod).
-scheduler_base_url = getenv("AGENTOS_URL", "http://127.0.0.1:8000")
+# Where cron triggers reach AgentOS, and — when MCP OAuth is enabled — the public
+# origin the OAuth server advertises (set your public URL in prod).
+agentos_url = getenv("AGENTOS_URL", "http://127.0.0.1:8000")
+
+# MCP OAuth — armed by setting MCP_CONNECT_SECRET. The deployment becomes its own
+# OAuth 2.1 authorization server on /mcp: claude.ai, ChatGPT, and the local MCP
+# clients connect by URL and you approve each one on a consent page with this
+# secret. Tokens arrive as the reserved `__oauth__:<client_id>` principal, which
+# the owner gate honors (see app/mcp.py — only your consent can mint one). Unset,
+# /mcp is unchanged (JWT in prod, keyless-as-owner in dev).
+mcp_auth = None
+if getenv("MCP_CONNECT_SECRET"):
+    from agno.os import AgentOSBuiltinAuth
+
+    mcp_auth = AgentOSBuiltinAuth(
+        url=agentos_url,
+        secret=getenv("MCP_CONNECT_SECRET", ""),
+        signing_key_material=getenv("AGENTOS_MCP_SIGNING_KEY"),
+    )
 
 
 def _build_interfaces() -> list:
@@ -80,12 +97,7 @@ async def lifespan(app):  # type: ignore[no-untyped-def]
 
 # User isolation scopes the OS REST endpoints (sessions / memory / runs) to the
 # verified JWT user. Only takes effect when authorization is on (prod).
-_self_verification_key = getenv("CONTEXT_SELF_VERIFICATION_KEY", "").strip()
-authorization_config = AuthorizationConfig(
-    user_isolation=True,
-    verification_keys=[_self_verification_key] if _self_verification_key else None,
-    algorithm="RS256",
-)
+authorization_config = AuthorizationConfig(user_isolation=True)
 
 agent_os = AgentOS(
     tracing=True,
@@ -98,13 +110,14 @@ agent_os = AgentOS(
     config=str(Path(__file__).parent / "config.yaml"),  # Quick prompts for the agents.
     authorization=is_prd(),  # JWT authorization in production.
     authorization_config=authorization_config,
-    scheduler_base_url=scheduler_base_url,
+    scheduler_base_url=agentos_url,
     internal_service_token=getenv("INTERNAL_SERVICE_TOKEN") or None,
     # Owner-only single-tool MCP server at /mcp — see app/mcp.py.
     mcp_server=context_mcp_config(),
+    mcp_auth=mcp_auth,
 )
 app = agent_os.get_app()
-log_info("@context: owner-only MCP server mounted at /mcp")
+log_info(f"@context: owner-only MCP server mounted at /mcp (OAuth {'on' if mcp_auth else 'off'})")
 
 
 if __name__ == "__main__":

@@ -4,10 +4,11 @@ The Inbound Queue
 
 Let your teammates (and their agents) leave you non-urgent updates.
 
-Three tools for managing your inbound queue:
-- `submit_update` — the only tool a guest user can use. Append-only write to the owner's queue. `from_person` is taken from the verified identity so a caller can't spoof who an update is from. No readback — you can drop a note in the owner's inbox, you can't read it.
+Four tools for managing your inbound queue:
+- `submit_update` — a guest's write. Append-only to the owner's queue. `from_person` is taken from the verified identity so a caller can't spoof who an update is from. No readback into the owner's data — you can drop a note in the owner's inbox, you can't read the inbox.
+- `my_updates` — a guest's *own* receipts: the updates this verified caller has left, and whether the owner has seen them. The filter is the caller's verified identity, closed over in code — it can never return another sender's rows, let alone the owner's data. The asymmetry survives: anyone can write, and can see what *they* wrote; only the owner reads the queue.
 - `rundown` — owner-only. Everything awaiting the owner: every update they haven't acknowledged, grouped blocked → done → in progress. Shows them and advances `new → briefed`, stamping `briefed_at`.
-- `acknowledge` — owner-only. Moves updates to `acknowledged` (stamping `acknowledged_at`) so they drop off the rundown. Only the owner moves the ack axis — and that falls out of the toolset for free (a guest never holds these tools).
+- `acknowledge` — owner-only. Moves updates to `acknowledged` (stamping `acknowledged_at`) so they drop off the rundown, then best-effort DMs each human submitter a one-line receipt. Only the owner moves the ack axis — and that falls out of the toolset for free (a guest never holds these tools).
 
 The owner-only tools also check `is_owner` and raise `StopAgentRun` — redundant behind the toolset gate + the tool_hook in `agents.policy`, but a cheap defense none the less.
 """
@@ -20,7 +21,7 @@ from agno.run import RunContext
 from agno.tools import tool
 from sqlalchemy import text
 
-from app.identity import CANONICAL_OWNER_ID, is_owner
+from app.identity import CANONICAL_OWNER_ID, is_owner, owner_display_name
 from db import SCHEMA, get_sql_engine
 
 _UPDATES = f"{SCHEMA}.updates"
@@ -164,6 +165,57 @@ def submit_update(
     return "Filed your update for the owner."
 
 
+# Guest-facing labels for the ack axis. "new" only means the owner hasn't had a
+# rundown yet — never promise more than the queue knows.
+_ACK_LABELS = {
+    "new": "delivered, not yet in a rundown",
+    "briefed": "surfaced in the owner's rundown",
+    "acknowledged": "seen and acknowledged by the owner",
+}
+
+
+@tool
+def my_updates(run_context: RunContext) -> str:
+    """List the updates *you* have left for the owner, newest first, with status.
+
+    Shows only this caller's own submissions — whether each has been delivered,
+    surfaced in the owner's rundown, or acknowledged. Use it for "did my update
+    land?" or "has the owner seen my note about X?".
+    """
+    if CANONICAL_OWNER_ID is None:
+        return "No owner is configured, so there is no queue to check."
+
+    # The filter is the verified caller identity — never a model argument — so
+    # this can only ever return the caller's own rows.
+    caller = getattr(run_context, "user_id", None)
+    if not caller or caller == "anon":
+        return "I can't verify who you are on this connection, so I can't look up your updates."
+
+    with get_sql_engine().begin() as conn:
+        rows = conn.execute(
+            text(
+                f"""
+                SELECT title, work_status, ack_status, created_at
+                FROM {_UPDATES}
+                WHERE user_id = :owner AND from_person = :caller
+                ORDER BY created_at DESC
+                LIMIT 10
+                """
+            ),
+            {"owner": CANONICAL_OWNER_ID, "caller": caller},
+        ).all()
+
+    if not rows:
+        return "You haven't left any updates yet."
+
+    lines = [f"Your {len(rows)} most recent update(s):"]
+    for r in rows:
+        when = f" ({r.created_at.strftime('%Y-%m-%d')})" if r.created_at else ""
+        status = _ACK_LABELS.get(r.ack_status, r.ack_status)
+        lines.append(f"- {r.title}{when} — {status}")
+    return "\n".join(lines)
+
+
 @tool
 def rundown(run_context: RunContext) -> str:
     """Give the owner a rundown of everything awaiting them.
@@ -222,16 +274,39 @@ def acknowledge(run_context: RunContext, update_ids: list[int]) -> str:
 
     engine = get_sql_engine()
     with engine.begin() as conn:
-        result = conn.execute(
+        acked = conn.execute(
             text(
                 f"UPDATE {_UPDATES} SET ack_status = 'acknowledged', acknowledged_at = NOW() "
-                f"WHERE user_id = :owner AND id = ANY(:ids) AND ack_status <> 'acknowledged'"
+                f"WHERE user_id = :owner AND id = ANY(:ids) AND ack_status <> 'acknowledged' "
+                f"RETURNING title, from_person"
             ),
             {"owner": CANONICAL_OWNER_ID, "ids": ids},
-        )
-        count = result.rowcount
+        ).all()
 
-    return f"Acknowledged {count} update(s)."
+    # Close the loop: DM each human submitter a one-line receipt. After the
+    # commit (the ack is the source of truth; a failed DM never rolls it back),
+    # best-effort, and only to email-shaped senders — system rows (`@context`)
+    # and raw Slack ids are skipped. The receipt names only the sender's own
+    # update, so it crosses no boundary.
+    _send_ack_receipts(acked)
+
+    return f"Acknowledged {len(acked)} update(s)."
+
+
+def _send_ack_receipts(acked: Sequence[Any]) -> None:
+    """Best-effort 'the owner saw your update' DMs, one per submitter."""
+    from workflows.notify import dm_user
+
+    from_owner = owner_display_name()
+    by_person: dict[str, list[str]] = {}
+    for row in acked:
+        person = (row.from_person or "").strip()
+        if "@" in person and not person.startswith("@"):
+            by_person.setdefault(person, []).append(row.title)
+    for person, titles in by_person.items():
+        listed = "\n".join(f"• {t}" for t in titles)
+        plural = "s" if len(titles) > 1 else ""
+        dm_user(person, f"✅ {from_owner} saw your update{plural}:\n{listed}")
 
 
 def queue_owner_note(title: str, body: str = "", *, source: str = "system", work_status: str = "done") -> bool:
@@ -266,15 +341,20 @@ def queue_owner_note(title: str, body: str = "", *, source: str = "system", work
 # ---------------------------------------------------------------------------
 
 # The exact toolset a guest is handed — the guest branch of
-# agents.policy.context_tools returns this list.
-GUEST_TOOLS = (submit_update,)
+# agents.policy.context_tools returns this list. Both tools are scoped to the
+# caller's own verified identity: submit_update writes as them, my_updates
+# reads only what they wrote.
+GUEST_TOOLS = (submit_update, my_updates)
 
 # The allowlist the tool_hook enforces for guest callers: the guest
 # toolset (derived, so the two can't drift) plus the per-caller learning
 # tools — the agent's LearningMachine adds `update_user_memory` and
 # `update_profile` for every caller, each keyed in code to the caller's own
-# verified id, so they cross no boundary (see docs/SECURITY.md).
+# verified id, so they cross no boundary (see docs/SECURITY.md) — plus the
+# guest scheduling read (`owner_availability`, agents/scheduling.py), which
+# exposes free/busy windows only, never calendar contents.
 CAPTURE_ONLY_TOOLS: frozenset[str] = frozenset(t.name for t in GUEST_TOOLS) | {
     "update_user_memory",
     "update_profile",
+    "owner_availability",
 }

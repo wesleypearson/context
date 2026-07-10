@@ -22,7 +22,7 @@ deploy: their database, their knowledge base, their keys.
 | The owner's stored context (CRM, knowledge base, queue) | Any guest caller reading it | Identity-conditioned toolset — guests get no read tools |
 | The ack axis (what's "handled") | Anyone but the owner marking items done/acknowledged | Only the owner's toolset has the ack tool |
 | Acting *as* the owner (changing the calendar) | The model doing it unprompted; guests triggering it | Owner-only act tool + a per-call approval gate — the run pauses until the owner confirms (L6). Email is draft-only, so @context never sends. |
-| Reading / acting / filing through the MCP server | Any non-owner reaching the `/mcp` connector | Owner-only, fail-closed gate — JWT then an owner check that 401s everyone else; DNS-rebinding protection on (L7) |
+| Reading / acting / filing through the MCP server | Any non-owner reaching the `/mcp` connector | Owner-only, fail-closed gate — token verification (MCP OAuth / JWT) then an owner check that 401s everyone else; DNS-rebinding protection on (L7) |
 | Identity itself | A caller or the model forging "I am the owner" | Trusted identity from verified JWT / Slack HMAC, not the request body |
 | Data at rest | Cross-user reads via the OS REST API | `user_isolation` + `user_id`-scoped engines |
 
@@ -103,16 +103,34 @@ a capture-only guide that names the owner and states that the configured
 providers are not accessible in this session. A guest's prompt never
 advertises the owner surface.
 
-### L2 — Capture-only surface + the one deliberate cross-user write
+### L2 — Capture surface + the one deliberate cross-user write
 
-Guests get exactly one context tool: `submit_update`
-([`agents/inbox.py`](../agents/inbox.py)). No `query_*`, no reads, no briefing.
-It appends to the **owner's** queue (`crm.updates`, `user_id = OWNER`,
-`from_person = <caller>`, `ack_status = 'new'`). This is the single allowed
-cross-user operation, and it's safe because it's **append-only with no
-readback** — a teammate can drop a note in your inbox but can't read your inbox.
-`from_person` is taken from the verified identity, never a model argument, so a
-caller can't spoof who an update is from.
+Guests get the capture surface ([`agents/inbox.py`](../agents/inbox.py),
+[`agents/scheduling.py`](../agents/scheduling.py)). No `query_*`, no reads into
+the owner's data, no briefing. Three tools, each scoped in code:
+
+- **`submit_update`** appends to the **owner's** queue (`crm.updates`,
+  `user_id = OWNER`, `from_person = <caller>`, `ack_status = 'new'`). This is
+  the single allowed cross-user *write*, and it's safe because it's
+  **append-only with no readback** — a teammate can drop a note in your inbox
+  but can't read your inbox. `from_person` is taken from the verified identity,
+  never a model argument, so a caller can't spoof who an update is from (the
+  `attribution_is_unspoofable` eval gate proves the schemas expose no identity
+  parameter).
+- **`my_updates`** reads back *only the caller's own submissions* and their ack
+  status. The filter is `from_person = <verified caller>`, closed over in code —
+  it structurally cannot return another sender's rows, let alone the owner's
+  data. The asymmetry survives intact: anyone can write, and can see what *they*
+  wrote; only the owner reads the queue.
+- **`owner_availability`** (present iff the calendar is connected) answers
+  "when could I meet the owner?" from Google's **free/busy** API — busy
+  intervals only, reduced to open windows. Titles, attendees, and locations are
+  never fetched, so there is nothing to leak even in principle. The meeting
+  request itself is a `submit_update`; guests never hold a calendar write.
+
+When the owner acknowledges an update, the submitter gets a one-line Slack
+receipt (`dm_user`, [`workflows/notify.py`](../workflows/notify.py)) naming only
+their own update — delivery confirmation, not a read path.
 
 **Per-user memory + profile — the one capability every caller keeps.**
 The agent's `learning=LearningMachine(...)` — user profile + user memory, both
@@ -224,16 +242,32 @@ owner, and fail closed.
 It's the **same "structural, not a prompt rule" pattern**, applied to a network
 endpoint — the gate is in code, before the model runs:
 
-- **JWT first (prod).** The server reuses the *same* `authorization_config`
-  AgentOS uses for the REST API (passed in from [`app/main.py`](../app/main.py)),
-  so the verified `sub` arrives identically — non-forgeable.
+- **Token verification first (prod).** In production the front door is **MCP
+  OAuth** — set `MCP_CONNECT_SECRET` and the deployment is its own OAuth 2.1
+  authorization server on `/mcp` (the os.agno.com UI keeps its own door: the
+  control-plane JWT on the REST API). Every `/mcp` request is verified by
+  agno's MultiAuth — MCP OAuth access tokens, service-account PATs, and
+  control-plane JWTs all resolve through the same verification layer — and an
+  identity bridge stamps the **verified principal** as the request's `user_id`
+  before anything of ours runs. Non-forgeable; an unauthenticated request gets
+  the RFC 9728 challenge (connector discovery, not a bypass).
 - **Owner check, then 401.** The `authorize=_caller_is_owner` gate
-  (`MCPServerConfig`, run by AgentOS after JWT verification) rejects anyone who
-  is not in `OWNER_ID` with **401** — it never falls back to the capture-only
-  guest surface. An unauthenticated call, a valid non-owner token, and the
-  `__scheduler__` sentinel are all rejected (the human read/act path is stricter
-  than `is_owner` — the scheduler never calls it). With no owner configured the
-  gate 401s everyone.
+  (`MCPServerConfig`, run by AgentOS after token verification) rejects anyone
+  who is not in `OWNER_ID` with **401** — it never falls back to the
+  capture-only guest surface. One addition, live only while OAuth is armed: the
+  reserved `__oauth__:<client_id>` principal is trusted, because it is minted
+  only by *this deployment's own* OAuth server after the owner typed
+  `MCP_CONNECT_SECRET` on the consent page (the secret **is** an owner
+  credential on a single-owner deploy), and agno rejects any external token
+  claiming the reserved namespace — so the prefix can't be impersonated from
+  outside. `sa:` service-account principals get **no** surface (a PAT verifies,
+  the owner gate 401s it), and `OWNER_ID` entries claiming either reserved
+  namespace are dropped at parse time ([`app/identity.py`](../app/identity.py)).
+  An unauthenticated call, a valid non-owner token, and the `__scheduler__`
+  sentinel are all rejected (the human read/act path is stricter than
+  `is_owner` — the scheduler never calls it). With no owner configured the gate
+  401s everyone; with `MCP_CONNECT_SECRET` unset the `__oauth__:` prefix is
+  rejected like everything else.
 - **Owner identity threaded through.** AgentOS injects the verified JWT `sub`
   as the tool's `user_id` and hides it from the client-facing schema, so a caller
   can never supply or spoof it; `use_context` re-checks it (`_caller_is_owner`)
@@ -252,10 +286,12 @@ endpoint — the gate is in code, before the model runs:
 We use AgentOS's native MCP server (`mcp_server=context_mcp_config()`)
 — the owner gate, DNS-rebinding protection, and
 `user_id` injection are all configured on the `MCPServerConfig`, so there's no
-custom middleware to maintain. In dev (no JWT) the gate binds to the canonical
+custom middleware to maintain. In dev (no auth) the gate binds to the canonical
 `OWNER_ID`, the same keyless-local-as-owner shortcut used elsewhere — dev-only.
 The deterministic eval `mcp_server_is_owner_only` proves the gate accepts the
-owner and 401s everyone else, no model in the loop.
+owner and 401s everyone else, no model in the loop — including **both
+directions** of the OAuth principal rule: `__oauth__:<client_id>` is accepted
+iff OAuth is armed, and `sa:` is rejected either way.
 
 ---
 

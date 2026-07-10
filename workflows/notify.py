@@ -1,18 +1,25 @@
 """
-Owner Notifications
-===================
+Notifications
+=============
 
-A single outbound channel for proactively nudging the **owner** on Slack — the
-reminder sweep and the scheduled digests both reach the owner through here.
+A single outbound channel for proactive Slack DMs — deterministic (no model, no
+approval), best-effort, and email-addressed.
 
-This is a self-notification path: it DMs the owner their own follow-ups and
-briefs. That is why it is ungated and deterministic (no model, no approval) — you
-are messaging yourself, not acting on the outside world. It is distinct from the
-`update_slack` *tool*, which the agent uses to message other people and channels.
+Two callers, two directions:
+- `dm_owner` — the self-notification path: the reminder sweep and the scheduled
+  digests DM the owner their own follow-ups and briefs. Ungated because you are
+  messaging yourself, not acting on the outside world.
+- `dm_user` — the receipt path: when the owner acknowledges a teammate's update,
+  the teammate gets a one-line "seen" DM. Ungated for the same reason messaging
+  is (docs/SECURITY.md): a receipt confirms delivery of the sender's own
+  message; it carries no owner data.
+
+Both are distinct from the `update_slack` *tool*, which the agent uses to message
+people and channels on request.
 
 No-op (returns False) unless Slack DMs are actually available: `SLACK_BOT_TOKEN`
-(the bot token that sends) and an owner email (an `OWNER_ID` entry that looks like
-one, used to resolve the IM via `users.lookupByEmail`). `SLACK_SIGNING_SECRET`
+(the bot token that sends) and an email to resolve via `users.lookupByEmail`
+(for the owner: an `OWNER_ID` entry that looks like one). `SLACK_SIGNING_SECRET`
 only verifies *inbound* Slack requests, so it plays no part here — sending needs
 just the token, with the `users:read.email`, `im:write`, `chat:write` scopes.
 """
@@ -33,17 +40,17 @@ def slack_dm_target() -> tuple[str, str] | None:
     return None
 
 
-def dm_owner(text: str) -> bool:
-    """Best-effort: DM the owner `text` on Slack. Returns whether it was sent.
+def dm_user(email: str, text: str) -> bool:
+    """Best-effort: DM the Slack user behind `email`. Returns whether it was sent.
 
     Every failure is logged and swallowed — callers treat the DM as a nudge layered
     on top of a durable source of truth (the inbound queue), never as the delivery
-    guarantee itself. No-op when Slack DMs aren't configured (see module docstring).
+    guarantee itself. No-op when the bot token isn't set or `email` doesn't resolve
+    to a workspace member.
     """
-    target = slack_dm_target()
-    if target is None:
+    token = getenv("SLACK_BOT_TOKEN")
+    if not (token and email and "@" in email):
         return False
-    token, email = target
     try:
         from slack_sdk import WebClient
 
@@ -53,5 +60,18 @@ def dm_owner(text: str) -> bool:
         client.chat_postMessage(channel=channel, text=text)
         return True
     except Exception as exc:
-        log_warning(f"dm_owner: could not DM the owner on Slack: {exc}")
+        log_warning(f"dm_user: could not DM {email} on Slack: {exc}")
         return False
+
+
+def dm_owner(text: str) -> bool:
+    """Best-effort: DM the owner `text` on Slack. Returns whether it was sent.
+
+    The self-notification path (see module docstring). No-op when Slack DMs
+    aren't configured.
+    """
+    target = slack_dm_target()
+    if target is None:
+        return False
+    _, email = target
+    return dm_user(email, text)

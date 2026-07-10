@@ -219,12 +219,17 @@ A few things to note:
 
 ## What turns on with Slack
 
-Setting `SLACK_BOT_TOKEN` (plus `SLACK_SIGNING_SECRET` for the inbound interface) lights up three things, all from the same bot token:
+Setting `SLACK_BOT_TOKEN` (plus `SLACK_SIGNING_SECRET` for the inbound interface) lights up four things, all from the same bot token:
 
 1. **The chat interface** — @context answers in Slack (DMs and @-mentions), and teammates and their agents reach it there. Identity is resolved per request (see [How it works](#how-it-works)).
 2. **`update_slack` — the send tool (owner-only, ungated).** The owner can ask @context to post to a channel, reply in a thread, DM a teammate, or @-mention another person's @context. Sending a Slack message is ordinary communication, so it runs without an approval pause — as does `update_gmail`, which only ever drafts (never sends). The one tool that pauses for approval is `update_calendar` (see [`docs/SECURITY.md`](SECURITY.md) L6). It rides the provider surface, so a *guest* never holds it. The scopes it needs (`chat:write`, `chat:write.public`, `im:write`, `users:read`) are already in the manifest above — no extra setup.
 3. **Scheduled digests — delivered to your DM.** With Slack active, two schedules auto-arm: a daily **rundown** and a weekly **week-plan**, each run as the owner and DM'd to you. They're read-only briefs (no act tool fires), and they DM *you* — self-notification, ungated. Tune the timing with `DAILY_DIGEST_CRON` / `WEEKLY_DIGEST_CRON` (UTC cron; defaults are a daily 13:00 UTC rundown and a Sunday-evening plan). The reminder sweep already DMs you the same way the moment a reminder comes due.
+4. **Acknowledgement receipts — the loop closes for teammates.** When you acknowledge a teammate's update, @context best-effort DMs them a one-line receipt ("✅ Ash saw your update: …"). Same self-explanatory rule as the digests: the receipt names only the sender's own update, so it crosses no boundary. (Sender identities that aren't workspace emails — agents, system rows — are skipped.)
+
+Teammates also get real answers in the DM, not just a mailbox: `my_updates` shows them *their own* past submissions and whether you've seen each one, and — when your calendar is connected — `owner_availability` offers your open windows (free/busy only, never event details) so anyone can find time with you without ever seeing your calendar. Both are scoped to the caller's verified identity in code, like `submit_update` itself.
 
 ### The context network
 
 Because `update_slack` can @-mention another person's @context, and that context receives the mention through *its own* Slack interface, your team's @context agents talk to each other with no extra infrastructure. When your @context @-mentions `@dana-context`, Dana's deployment sees *your* verified Slack identity as a **guest**, so the message lands in Dana's queue (capture-only) and can't read Dana's data back. The asymmetry holds across the whole network: anyone — including another agent — can write to a context, but only its owner can read it. See [`docs/NETWORK.md`](NETWORK.md).
+
+One mechanical prerequisite on the *receiving* side: Slack interfaces drop bot-authored events by default (echo-loop protection), so the receiving deployment must opt in with the interface's `respond_to_bot_messages` flag before another agent's @-mention reaches it. The flag ships in agno's next release; until @context wires it on, the network sends today and receives when that lands — [`docs/NETWORK.md`](NETWORK.md) tracks the state.

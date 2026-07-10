@@ -3,13 +3,14 @@ Context MCP server
 ======================
 
 @context comes with a one-tool MCP server (`use_context`) which lets the owner
-read, file, and act through @context from MCP clients — Claude Code, Codex, and
-the Claude / ChatGPT desktop apps.
+read, file, and act through @context from MCP clients — claude.ai, ChatGPT,
+Claude Code, Codex, Cursor, and the desktop apps.
 
-The CLI clients register it with one command (`claude mcp add` / `codex mcp add`)
-against http://localhost:8000/mcp; the desktop apps reach the same endpoint
-through a small mcp-remote stdio bridge. Cloud clients (ChatGPT web, Claude web)
-need a public HTTPS URL — a deploy or an ngrok tunnel (see docs/MCP.md).
+In production the front door is MCP OAuth (set `MCP_CONNECT_SECRET` — see
+app/main.py): the deployment is its own OAuth 2.1 authorization server, so a
+client connects by URL and the owner approves it once on a consent page with
+the connect secret. Local dev needs no auth at all (keyless-as-owner, guarded
+by `allowed_hosts`).
 
 The @context mcp server exposes one tool:
 
@@ -19,7 +20,7 @@ One tool, not several: `use_context` runs the real context agent as the owner,
 which reads, files, and acts on its own — so the client has one obvious door for
 anything about the owner's work, rather than a read-vs-write routing decision.
 
-AgentOS owns the JWT layer, the owner gate (`authorize`), DNS-rebinding
+AgentOS owns token verification, the owner gate (`authorize`), DNS-rebinding
 protection (`allowed_hosts`), and `user_id` injection — there is no custom
 middleware in this module. See `context_mcp_config()` below.
 """
@@ -32,7 +33,7 @@ from agno.os.config import MCPServerConfig
 from agno.tools import tool
 
 from agents.context import context
-from app.identity import CANONICAL_OWNER_ID, OWNER_IDS
+from app.identity import CANONICAL_OWNER_ID, MCP_OAUTH_PREFIX, OWNER_IDS
 from app.settings import is_prd, use_context_timeout
 
 # The MCP endpoint path. AgentOS mounts the MCP server at this path.
@@ -80,12 +81,23 @@ def _caller_is_owner(user_id: str | None) -> bool:
     keeping the human read/act surface to real owner identities is one fewer
     thing to reason about.
 
+    One additional identity is trusted, only while MCP OAuth is armed: the
+    reserved ``__oauth__:<client_id>`` principal AgentOS's built-in OAuth
+    server assigns a connected client. Minting one requires the owner to type
+    ``MCP_CONNECT_SECRET`` on the consent page (the secret *is* an owner
+    credential on this single-owner deploy), and agno rejects any external
+    token claiming the reserved namespace — so the prefix is as trustworthy as
+    ``__scheduler__``, per client. With the secret unset the prefix is
+    rejected like everything else.
+
     Resolves dev shortcuts via :func:`_resolve_caller_id` so the local
     keyless-as-owner path still works in dev.
     """
     resolved = _resolve_caller_id(user_id)
     if not resolved:
         return False
+    if resolved.startswith(MCP_OAUTH_PREFIX):
+        return bool(getenv("MCP_CONNECT_SECRET"))
     return resolved.casefold() in OWNER_IDS
 
 

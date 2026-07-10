@@ -12,7 +12,9 @@
 #    and deploys — forwarding everything set in .env.production, including
 #    OWNER_ID and the multi-line JWT_VERIFICATION_KEY. If the JWT key isn't
 #    set yet, the script pauses after printing your domain so you can mint
-#    it at os.agno.com — so the first deploy comes up serving.
+#    it at os.agno.com — so the first deploy comes up serving. Generates
+#    MCP_CONNECT_SECRET (MCP OAuth for the /mcp connector) into the env file
+#    when missing, and prints the connector recipe at the end.
 #
 #    Prerequisites:
 #      - Railway CLI installed
@@ -212,6 +214,26 @@ if [[ -z "$AGENTOS_URL" && -n "$APP_URL" ]]; then
     echo -e "${DIM}Set AGENTOS_URL=${APP_URL} (Railway${AGENTOS_URL_PERSISTED:+ + ${ENV_FILE}})${NC}"
 fi
 
+# MCP OAuth — claude.ai and ChatGPT (web) connect to /mcp over OAuth only, and
+# the consent page is gated by MCP_CONNECT_SECRET. Generate one on the user's
+# behalf when the env file doesn't have one (needs the public domain — OAuth
+# advertises AGENTOS_URL as its origin). Set quietly via `railway variables`
+# so the secret never echoes into the deploy log; same for the optional
+# AGENTOS_MCP_SIGNING_KEY (the token signing root — rotating it revokes every
+# issued token) when the env file pins one.
+if [[ -z "${MCP_CONNECT_SECRET:-}" && ( -n "$AGENTOS_URL" || -n "$APP_URL" ) ]]; then
+    MCP_CONNECT_SECRET="$(openssl rand -base64 32)"
+    export MCP_CONNECT_SECRET
+    ENV_FILE="${ENV_FILE:-.env.production}"
+    [[ -f "$ENV_FILE" ]] || : > "$ENV_FILE"
+    persist_env_var MCP_CONNECT_SECRET "$MCP_CONNECT_SECRET" "$ENV_FILE"
+    echo -e "${DIM}Generated MCP_CONNECT_SECRET → ${ENV_FILE} + Railway (shown in the summary below)${NC}"
+fi
+[[ -n "${MCP_CONNECT_SECRET:-}" ]] && \
+    railway variables --set "MCP_CONNECT_SECRET=${MCP_CONNECT_SECRET}" --service agent-os > /dev/null 2>&1
+[[ -n "${AGENTOS_MCP_SIGNING_KEY:-}" ]] && \
+    railway variables --set "AGENTOS_MCP_SIGNING_KEY=${AGENTOS_MCP_SIGNING_KEY}" --service agent-os > /dev/null 2>&1
+
 # JWT auth is on in prd and the app refuses to serve without the key. Now
 # that the domain exists, the user can mint it — pause, then re-read the
 # env file so the first deploy comes up serving.
@@ -249,4 +271,11 @@ echo -e "${BOLD}Done.${NC} The app is building — give it a few minutes."
 [[ -n "$APP_URL" ]] && echo -e "${DIM}URL:          ${APP_URL}${NC}"
 echo -e "${DIM}Logs:         railway logs --service agent-os${NC}"
 echo -e "${DIM}Env changes:  ./scripts/railway/env-sync.sh  (defaults to .env.production)${NC}"
+[[ -n "$APP_URL" ]] && echo -e "${DIM}Connect apps: uvx agno connect --url ${APP_URL}${NC}"
+if [[ -n "$APP_URL" && -n "${MCP_CONNECT_SECRET:-}" ]]; then
+    echo -e "${DIM}Chat apps:    add ${APP_URL}/mcp as a custom connector in claude.ai / ChatGPT${NC}"
+    echo -e "${DIM}              (leave the optional OAuth client ID/secret fields empty).${NC}"
+    echo -e "${DIM}              Then click Connect and approve the consent page with this secret:${NC}"
+    echo -e "${BOLD}              ${MCP_CONNECT_SECRET}${NC}"
+fi
 echo ""

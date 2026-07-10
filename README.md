@@ -9,7 +9,7 @@ It plugs into clients like claude, chatGPT, claude code, and codex, and gives th
 @context is built with privacy and security as first principles. It runs in two modes:
 
 1. **Owner mode.** You get every tool. Capture context (*"met Kyle from Agno, follow up next week"*), retrieve context (*"give me a rundown of my day"*), and prepare context (*"process today"*).
-2. **Guest mode.** Teammates (*and their agents*) can leave updates in your queue. You get briefed when you ask for a rundown.
+2. **Guest mode.** Teammates (*and their agents*) can leave updates in your queue, check whether you've seen *their own* updates, and — when your calendar is connected — ask for your open windows (free/busy only, never event details) to request time with you. You get briefed when you ask for a rundown, and when you acknowledge an update the sender gets a one-line "seen" receipt.
 
 @context runs on Agno's AgentOS runtime, so user identity is verified on every request, and tools are assigned by role (owner or guest).
 
@@ -92,7 +92,7 @@ Add @context to every MCP client on your machine with one command:
 python scripts/connect.py
 ```
 
-The script finds Claude Code, Codex, the Claude Desktop app, and Cursor, and registers @context with each. Use `--dry-run` to preview and `--remove` to undo. Once you've deployed, the same script points your clients at the live instance — see [Connect production @context MCP server](#connect-production-context-mcp-server).
+The script finds Claude Code, Codex, the Claude Desktop app, and Cursor, and registers @context with each. Use `--dry-run` to preview and `--remove` to undo. It wires the **local dev** server; a deployed instance uses OAuth instead — see [Connect production @context MCP server](#connect-production-context-mcp-server).
 
 ### Add @context to MCP clients manually
 
@@ -254,24 +254,24 @@ See [`docs/SLACK.md`](docs/SLACK.md#moving-from-local-to-production) for full st
 
 ## Connect production @context MCP server
 
-Once @context is deployed (you have a Railway domain), point your MCP clients at the production endpoint instead of localhost. The deployed server is JWT-gated, so this needs a bearer token — for the MCP server, we mint our own and push it to Railway. One command does the whole thing:
+Once @context is deployed (you have a Railway domain), MCP clients connect over **OAuth** — no tokens to mint, nothing to paste into client configs. Setting `MCP_CONNECT_SECRET` turns the deployment into its own OAuth 2.1 authorization server on `/mcp`: a client connects by URL, and you approve it once on a consent page by typing the secret.
+
+`./scripts/railway/up.sh` already generated the secret for you. If you deployed before it existed (or want to double-check), one command arms everything:
 
 ```sh
-source .venv/bin/activate     # mint needs pyjwt + cryptography (in requirements)
-./scripts/setup_context.sh    # login → mint token → push public key → redeploy → wire clients
+./scripts/setup_context.sh    # ensure the secrets → sync env → redeploy → print the connector recipe
 ```
 
-[`scripts/setup_context.sh`](scripts/setup_context.sh) is the single front door. By default it does a full setup: checks `railway login`, mints a fresh token, pushes the public key, runs a `railway up` redeploy (so a `railway.json` change like `numReplicas` lands), wires Claude Code, Codex, Claude Desktop, and Cursor with the token, then tells you to restart your apps. It never restarts apps for you or touches your data. Re-run it any time to rotate the token — add **`--no-redeploy`** to skip the redeploy and just rotate the token + rewire clients.
+[`scripts/setup_context.sh`](scripts/setup_context.sh) checks `railway login`, makes sure `MCP_CONNECT_SECRET` and `AGENTOS_MCP_SIGNING_KEY` exist in `.env.production` (generating them when missing), syncs the env to Railway, runs a `railway up` redeploy (so a `railway.json` change like `numReplicas` lands), then prints the connector recipe below with your real domain and secret. Add **`--no-redeploy`** to skip the redeploy. It never restarts apps for you or touches your data.
 
-Under the hood it chains three pieces you can also run by hand:
+Then connect your clients:
 
-1. [`scripts/mint_mcp_jwt.py`](scripts/mint_mcp_jwt.py) — self-issues an RS256 keypair (private key stays local in gitignored `secrets/`) and writes the public key + a signed admin token to `.env.production`.
-2. [`scripts/railway/env-sync.sh`](scripts/railway/env-sync.sh) — pushes the **public** key to Railway so the deploy trusts your token (the token itself stays off the server).
-3. [`scripts/connect.py --production`](scripts/connect.py) — threads the token into Claude Code, Codex, Claude Desktop, and Cursor.
+- **claude.ai / ChatGPT (web)**: add `https://<your-domain>/mcp` as a custom connector. **Leave the OAuth client ID/secret fields empty** — the server registers the client dynamically. Click Connect and approve the consent page with your `MCP_CONNECT_SECRET`.
+- **CLI clients**: `uvx agno connect --url https://<your-domain>` wires Claude Code, Codex, Cursor, and Claude Desktop and prints each client's sign-in step. Or by hand: `claude mcp add --transport http context https://<your-domain>/mcp`, then `claude mcp login context` (a browser consent) — `codex mcp add` / `codex mcp login` for Codex.
 
-You self-issue the token instead of copying one from os.agno.com, and @context trusts your key *alongside* the os.agno.com one — so the [AgentOS UI](#agentos-ui) keeps working too.
+The [AgentOS UI](#agentos-ui) keeps working alongside — it authenticates with the os.agno.com JWT, a separate door from MCP OAuth. If a client ever needs to be cut off, rotating `AGENTOS_MCP_SIGNING_KEY` revokes every issued token at once (every client re-consents); rotating `MCP_CONNECT_SECRET` only gates future consents.
 
-See [`docs/MCP.md`](docs/MCP.md#self-issued-production-token) for the full details: where the token comes from, per-client specifics (Codex's `$CONTEXT_JWT`, switching local→prod), ChatGPT/Claude web, and how it's secured.
+See [`docs/MCP.md`](docs/MCP.md#production-mcp-oauth) for the full details: the consent flow, per-client specifics, ChatGPT/Claude web, and how it's secured.
 
 ## Connect @context knowledge base to Git
 
@@ -368,8 +368,8 @@ python -m evals --case <name>  # one case
 | `OWNER_TIMEZONE` | no | `UTC` | Your IANA timezone (e.g. `America/Los_Angeles`). Anchors "today", due/overdue math, and relative dates to your local day. |
 | `RUNTIME_ENV` | no | `prd` | `dev` enables hot-reload and disables JWT. Compose sets this to `dev` for local. |
 | `JWT_VERIFICATION_KEY` | prd | none | Public key from os.agno.com. Required when `RUNTIME_ENV=prd`. |
-| `CONTEXT_SELF_VERIFICATION_KEY` | no | none | A second JWT public key the app *also* trusts, alongside the os.agno.com key — your own, so tokens you self-issue with `scripts/mint_mcp_jwt.py` verify (the os.agno.com UI keeps working). Written by that script; pushed to the server by `env-sync.sh`. See [Connect production @context MCP server](#connect-production-context-mcp-server). |
-| `CONTEXT_MCP_JWT` | no | none | The self-issued bearer token `scripts/connect.py --production` threads into your MCP clients. Client-side only (lives in `.env.production`, never pushed to the server). Minted by `scripts/mint_mcp_jwt.py`. |
+| `MCP_CONNECT_SECRET` | no | none | Arms **MCP OAuth**: the deployment becomes its own OAuth 2.1 authorization server on `/mcp`, and clients (claude.ai, ChatGPT, Claude Code, Codex, Cursor) connect by URL — you approve each one on a consent page by typing this secret. At least 16 chars (`openssl rand -base64 32`); `scripts/railway/up.sh` generates one. Unset means no OAuth (local dev stays keyless). See [Connect production @context MCP server](#connect-production-context-mcp-server). |
+| `AGENTOS_MCP_SIGNING_KEY` | no | generated, kept in Postgres | Pins the HS256 signing root for the MCP OAuth tokens (at least 32 chars). Pin it in production; **rotating it revokes every issued token** (the kill switch) — rotating `MCP_CONNECT_SECRET` only gates future consents. |
 | `AGENTOS_URL` | no | `http://127.0.0.1:8000` | Scheduler base URL. Also anchors the MCP server's Host allowlist — set it to your Railway/ngrok domain so the deployed or tunnelled `/mcp` endpoint accepts that Host (see [`docs/MCP.md`](docs/MCP.md)). |
 | `INTERNAL_SERVICE_TOKEN` | no | auto-generated | Scheduler-to-OS auth token. The deploy ships 1 replica, so the auto-generated value is fine; `scripts/railway/up.sh` still pins one so scaling up stays correct (override in `.env.production`). See [`docs/SCALING.md`](docs/SCALING.md). |
 | `PARALLEL_API_KEY` | no | none | Switches the `web` source from keyless Parallel MCP to the authenticated SDK (higher rate ceiling); recommended for production. Get a key at [platform.parallel.ai](https://platform.parallel.ai/settings?tab=api-keys). |
