@@ -14,7 +14,7 @@ from agno.utils.log import log_info, log_warning
 
 def default_model() -> OpenAIResponses:
     """Fresh model instance per agent — avoids memory leaks."""
-    return OpenAIResponses(id="gpt-5.5")
+    return OpenAIResponses(id="gpt-5.6-sol")
 
 
 def owner_timezone() -> str:
@@ -115,7 +115,7 @@ def backbone_query_timeout() -> float:
     The rundown fires its sources as one concurrent batch, so wall-clock is the
     slowest source, not the sum. Backbone and best-effort want opposite things from
     that window: best-effort should skip fast (``PROVIDER_TIMEOUT``), but the
-    backbone is the brief's spine and must reliably land — a gpt-5.5 sub-agent run
+    backbone is the brief's spine and must reliably land — a sub-agent run
     varies (~10-25s), so a tight 20s ceiling drops it too often. Giving the backbone
     a longer budget catches that slow tail while best-effort still skips fast; the
     batch's wall-clock is the larger of the two. Kept under ``use_context_timeout``

@@ -14,7 +14,7 @@ Two ideas define it:
 ## Architecture
 
 ```
-Context  (agents/context.py — one Agno agent, gpt-5.5)
+Context  (agents/context.py — one Agno agent, gpt-5.6-sol)
 │
 ├── ContextProviders (agents/sources.py)        each source = query_<id> / update_<id>
 │   ├── crm        DatabaseContextProvider        structured store (crm schema)  R/W  always on
@@ -47,7 +47,7 @@ Context  (agents/context.py — one Agno agent, gpt-5.5)
 
 Shared:
 - PostgreSQL + pgvector for sessions, memory, knowledge, and the `crm` schema (the structured store).
-- `app.settings.default_model()` returns `OpenAIResponses(id="gpt-5.5")` — bump the model in one place.
+- `app.settings.default_model()` returns `OpenAIResponses(id="gpt-5.6-sol")` — bump the model in one place.
 - Scheduler enabled by default (`scheduler=True`). Scheduled runs arrive with the verified identity `__scheduler__`, which `is_owner` treats as the owner (the scheduler is the owner's automation — see `docs/SECURITY.md`).
 - Slack interface is added automatically when both `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` are set, routed to `context` ([`docs/SLACK.md`](docs/SLACK.md)).
 - JWT auth on whenever `RUNTIME_ENV == "prd"`, with `user_isolation=True` (so production deploys are gated by default).
