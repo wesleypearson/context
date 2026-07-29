@@ -8,13 +8,17 @@ Shared runtime objects for the AgentOS.
 from os import getenv
 from zoneinfo import ZoneInfo
 
-from agno.models.openai import OpenAIResponses
+from agno.models.anthropic import Claude
 from agno.utils.log import log_info, log_warning
 
+# One place to bump the model for @context and every provider sub-agent.
+# Override with BRAIN_MODEL to A/B a different Claude without a code change.
+DEFAULT_MODEL_ID = getenv("BRAIN_MODEL", "claude-sonnet-5")
 
-def default_model() -> OpenAIResponses:
+
+def default_model() -> Claude:
     """Fresh model instance per agent — avoids memory leaks."""
-    return OpenAIResponses(id="gpt-5.6-sol")
+    return Claude(id=DEFAULT_MODEL_ID)
 
 
 def owner_timezone() -> str:
