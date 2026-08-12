@@ -207,6 +207,7 @@ The suite lives in [`evals/`](evals/) and is built around the product's headline
 | `KNOWLEDGE_GITHUB_TOKEN` | no | — | GitHub token for the knowledge base's `GitBackend`. Required alongside `KNOWLEDGE_REPO_URL`. |
 | `KNOWLEDGE_BRANCH` | no | `main` | Branch for the knowledge base's `GitBackend`. |
 | `KNOWLEDGE_LOCAL_PATH` | no | — | Local checkout path for the knowledge base's `GitBackend`. |
+| `CRM_INGEST_API_KEY` | no | — | Single static key gating `POST /crm/projects` (`app/crm_ingest.py`) — a deterministic, non-agent endpoint for external services to file a `crm.projects` row directly, bypassing the LLM-mediated `update_crm` tool. First caller: critique-tool's `critiqueApi` (artefact-platform issue #119). Unset ⇒ the endpoint 500s "not configured" rather than accepting unauthenticated writes. |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_DATABASE` | no | matches compose | Postgres connection. |
 | `DB_DRIVER` | no | `postgresql+psycopg` | SQLAlchemy driver. |
 | `AGNO_DEBUG` | no | `False` | If `True`, Agno emits verbose debug logs. Compose sets this for dev. |

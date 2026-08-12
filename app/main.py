@@ -13,6 +13,7 @@ from agno.utils.log import log_info
 
 from agents.context import context
 from agents.sources import close_context_providers, setup_context_providers, size_io_thread_pool
+from app.crm_ingest import router as crm_ingest_router
 from app.mcp import context_mcp_config
 from app.schedules import register_schedules
 from app.settings import is_prd, runtime_env, warn_on_missing_config
@@ -118,6 +119,10 @@ agent_os = AgentOS(
 )
 app = agent_os.get_app()
 log_info(f"@context: owner-only MCP server mounted at /mcp (OAuth {'on' if mcp_auth else 'off'})")
+
+# Deterministic (non-agent) ingest routes — see app/crm_ingest.py's module
+# docstring for why this bypasses the LLM-mediated update_crm tool.
+app.include_router(crm_ingest_router)
 
 
 if __name__ == "__main__":
