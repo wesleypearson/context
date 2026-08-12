@@ -72,6 +72,30 @@ def ingest_project(
         raise HTTPException(status_code=503, detail="No OWNER_ID configured — nowhere to file this")
 
     with get_sql_engine().begin() as conn:
+        # Best-effort idempotency: the row itself carries no caller-supplied
+        # external id to dedupe on (adding one would mean altering the
+        # shared crm.projects table's schema, which isn't this endpoint's
+        # call to make unilaterally), so this is a soft, time-boxed guard
+        # rather than a hard uniqueness constraint. Covers the two realistic
+        # duplicate sources: the caller retrying after this endpoint's own
+        # slow response, or crm-client.js's request timing out client-side
+        # (5s AbortController) after the INSERT already landed server-side.
+        # A genuine second project sharing the exact same name within 5
+        # minutes is the one case this could wrongly treat as a duplicate;
+        # accepted given the alternative (silent duplicate rows on every
+        # retry) is worse for a personal CRM meant to stay a clean record.
+        existing = conn.execute(
+            text(
+                "SELECT id FROM projects "
+                "WHERE user_id = :user_id AND name = :name "
+                "AND created_at > NOW() - INTERVAL '5 minutes' "
+                "ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"user_id": CANONICAL_OWNER_ID, "name": payload.name},
+        ).first()
+        if existing:
+            return ProjectIngestResult(id=existing[0])
+
         row = conn.execute(
             text(
                 "INSERT INTO projects (name, status, notes, tags, user_id) "
