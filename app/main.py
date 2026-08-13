@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from os import getenv
 from pathlib import Path
 
+from fastapi import FastAPI
+
 from agno.os import AgentOS
 from agno.os.config import AuthorizationConfig
 from agno.utils.log import log_info
@@ -100,6 +102,17 @@ async def lifespan(app):  # type: ignore[no-untyped-def]
 # verified JWT user. Only takes effect when authorization is on (prod).
 authorization_config = AuthorizationConfig(user_isolation=True)
 
+# Deterministic (non-agent) ingest routes — see app/crm_ingest.py's module
+# docstring for why this bypasses the LLM-mediated update_crm tool. Mounted
+# on a base_app handed to AgentOS (rather than app.include_router() *after*
+# agent_os.get_app()) because the MCP server mounts at Starlette level with
+# an empty path prefix — Mount("") matches every path — so it's checked
+# before any route added afterward and would silently 404 it. AgentOS adds
+# its own routes/mounts onto base_app in place, so routes already present on
+# it keep their earlier position in app.routes and are matched first.
+base_app = FastAPI()
+base_app.include_router(crm_ingest_router)
+
 agent_os = AgentOS(
     tracing=True,
     scheduler=True,
@@ -116,13 +129,10 @@ agent_os = AgentOS(
     # Owner-only single-tool MCP server at /mcp — see app/mcp.py.
     mcp_server=context_mcp_config(),
     mcp_auth=mcp_auth,
+    base_app=base_app,
 )
 app = agent_os.get_app()
 log_info(f"@context: owner-only MCP server mounted at /mcp (OAuth {'on' if mcp_auth else 'off'})")
-
-# Deterministic (non-agent) ingest routes — see app/crm_ingest.py's module
-# docstring for why this bypasses the LLM-mediated update_crm tool.
-app.include_router(crm_ingest_router)
 
 
 if __name__ == "__main__":
